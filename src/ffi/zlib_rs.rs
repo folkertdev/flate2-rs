@@ -138,6 +138,13 @@ impl Inflate {
     fn decompress_error<T>(&self) -> Result<T, DecompressError> {
         decompress_failed(ErrorMessage(self.inner.error_message()))
     }
+
+    pub fn set_dictionary(&mut self, dictionary: &[u8]) -> Result<u32, DecompressError> {
+        match self.inner.set_dictionary(dictionary) {
+            Ok(v) => Ok(v),
+            Err(_) => self.decompress_error(),
+        }
+    }
 }
 
 pub struct Deflate {
@@ -220,5 +227,12 @@ impl Backend for Deflate {
 impl Deflate {
     fn compress_error<T>(&self) -> Result<T, CompressError> {
         compress_failed(ErrorMessage(self.inner.error_message()))
+    }
+
+    pub fn set_dictionary(&mut self, dictionary: &[u8]) -> Result<u32, CompressError> {
+        match self.inner.set_dictionary(dictionary) {
+            Ok(v) => Ok(v),
+            Err(_) => self.compress_error(),
+        }
     }
 }

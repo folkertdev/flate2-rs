@@ -286,6 +286,14 @@ impl Compress {
         }
     }
 
+    /// Specifies the compression dictionary to use.
+    ///
+    /// Returns the Adler-32 checksum of the dictionary.
+    #[cfg(feature = "zlib-rs")]
+    pub fn set_dictionary(&mut self, dictionary: &[u8]) -> Result<u32, CompressError> {
+        self.inner.set_dictionary(dictionary)
+    }
+
     /// Quickly resets this compressor without having to reallocate anything.
     ///
     /// This is equivalent to dropping this object and then creating a new one.
@@ -540,6 +548,12 @@ impl Decompress {
         }
     }
 
+    /// Specifies the decompression dictionary to use.
+    #[cfg(feature = "zlib-rs")]
+    pub fn set_dictionary(&mut self, dictionary: &[u8]) -> Result<u32, DecompressError> {
+        self.inner.set_dictionary(dictionary)
+    }
+
     /// Performs the equivalent of replacing this decompression state with a
     /// freshly allocated copy.
     ///
@@ -749,7 +763,7 @@ mod tests {
         assert_eq!(&decoded[..decoder.total_out() as usize], string);
     }
 
-    #[cfg(feature = "any_zlib")]
+    #[cfg(any(feature = "any_zlib", feature = "zlib-rs"))]
     #[test]
     fn set_dictionary_raw() {
         let string = "hello, hello!".as_bytes();
