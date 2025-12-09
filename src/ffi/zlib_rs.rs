@@ -52,6 +52,9 @@ impl ErrorMessage {
 
 pub struct Inflate {
     pub(crate) inner: ::zlib_rs::Inflate,
+    // NOTE: these counts do not count the dictionary.
+    total_in: u64,
+    total_out: u64,
 }
 
 impl fmt::Debug for Inflate {
@@ -59,8 +62,8 @@ impl fmt::Debug for Inflate {
         write!(
             f,
             "zlib_rs inflate internal state. total_in: {}, total_out: {}",
-            self.inner.total_in(),
-            self.inner.total_out(),
+            self.total_in(),
+            self.total_out(),
         )
     }
 }
@@ -79,6 +82,8 @@ impl InflateBackend for Inflate {
     fn make(zlib_header: bool, window_bits: u8) -> Self {
         Inflate {
             inner: ::zlib_rs::Inflate::new(zlib_header, window_bits),
+            total_in: 0,
+            total_out: 0,
         }
     }
 
@@ -94,7 +99,15 @@ impl InflateBackend for Inflate {
             FlushDecompress::Finish => InflateFlush::Finish,
         };
 
-        match self.inner.decompress(input, output, flush) {
+        let total_in_start = self.inner.total_in();
+        let total_out_start = self.inner.total_out();
+
+        let result = self.inner.decompress(input, output, flush);
+
+        self.total_in += self.inner.total_in() - total_in_start;
+        self.total_out += self.inner.total_out() - total_out_start;
+
+        match result {
             Ok(status) => Ok(status.into()),
             Err(InflateError::NeedDict { dict_id }) => crate::mem::decompress_need_dict(dict_id),
             Err(e) => crate::mem::decompress_failed(ErrorMessage(Some(e.as_str()))),
@@ -102,6 +115,8 @@ impl InflateBackend for Inflate {
     }
 
     fn reset(&mut self, zlib_header: bool) {
+        self.total_in = 0;
+        self.total_out = 0;
         self.inner.reset(zlib_header);
     }
 }
@@ -109,17 +124,20 @@ impl InflateBackend for Inflate {
 impl Backend for Inflate {
     #[inline]
     fn total_in(&self) -> u64 {
-        self.inner.total_in()
+        self.total_in
     }
 
     #[inline]
     fn total_out(&self) -> u64 {
-        self.inner.total_out()
+        self.total_out
     }
 }
 
 pub struct Deflate {
     pub(crate) inner: ::zlib_rs::Deflate,
+    // NOTE: these counts do not count the dictionary.
+    total_in: u64,
+    total_out: u64,
 }
 
 impl fmt::Debug for Deflate {
@@ -127,8 +145,8 @@ impl fmt::Debug for Deflate {
         write!(
             f,
             "zlib_rs deflate internal state. total_in: {}, total_out: {}",
-            self.inner.total_in(),
-            self.inner.total_out(),
+            self.total_in(),
+            self.total_out(),
         )
     }
 }
@@ -140,6 +158,8 @@ impl DeflateBackend for Deflate {
 
         Deflate {
             inner: ::zlib_rs::Deflate::new(level.level() as i32, zlib_header, window_bits),
+            total_in: 0,
+            total_out: 0,
         }
     }
 
@@ -157,13 +177,23 @@ impl DeflateBackend for Deflate {
             FlushCompress::Finish => DeflateFlush::Finish,
         };
 
-        match self.inner.compress(input, output, flush) {
+        let total_in_start = self.inner.total_in();
+        let total_out_start = self.inner.total_out();
+
+        let result = self.inner.compress(input, output, flush);
+
+        self.total_in += self.inner.total_in() - total_in_start;
+        self.total_out += self.inner.total_out() - total_out_start;
+
+        match result {
             Ok(status) => Ok(status.into()),
             Err(e) => crate::mem::compress_failed(ErrorMessage(Some(e.as_str()))),
         }
     }
 
     fn reset(&mut self) {
+        self.total_in = 0;
+        self.total_out = 0;
         self.inner.reset();
     }
 }
@@ -171,11 +201,11 @@ impl DeflateBackend for Deflate {
 impl Backend for Deflate {
     #[inline]
     fn total_in(&self) -> u64 {
-        self.inner.total_in()
+        self.total_in
     }
 
     #[inline]
     fn total_out(&self) -> u64 {
-        self.inner.total_out()
+        self.total_out
     }
 }
