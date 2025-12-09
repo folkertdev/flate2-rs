@@ -311,22 +311,31 @@ impl Compress {
     /// the compression of the available input data before changing the
     /// compression level. Flushing the stream before calling this method
     /// ensures that the function will succeed on the first call.
-    #[cfg(feature = "any_zlib")]
+    #[cfg(any(feature = "any_zlib", feature = "zlib-rs"))]
     pub fn set_level(&mut self, level: Compression) -> Result<(), CompressError> {
-        use std::os::raw::c_int;
-        // SAFETY: The field `inner` must always be accessed as a raw pointer,
-        // since it points to a cyclic structure. No copies of `inner` can be
-        // retained for longer than the lifetime of `self.inner.inner.stream_wrapper`.
-        let stream = self.inner.inner.stream_wrapper.inner;
-        unsafe {
-            (*stream).msg = std::ptr::null_mut();
+        #[cfg(feature = "zlib-rs")]
+        {
+            self.inner.set_level(level)
         }
-        let rc = unsafe { ffi::deflateParams(stream, level.0 as c_int, ffi::MZ_DEFAULT_STRATEGY) };
 
-        match rc {
-            ffi::MZ_OK => Ok(()),
-            ffi::MZ_BUF_ERROR => compress_failed(self.inner.inner.msg()),
-            c => panic!("unknown return code: {}", c),
+        #[cfg(feature = "any_zlib")]
+        {
+            use std::os::raw::c_int;
+            // SAFETY: The field `inner` must always be accessed as a raw pointer,
+            // since it points to a cyclic structure. No copies of `inner` can be
+            // retained for longer than the lifetime of `self.inner.inner.stream_wrapper`.
+            let stream = self.inner.inner.stream_wrapper.inner;
+            unsafe {
+                (*stream).msg = std::ptr::null_mut();
+            }
+            let rc =
+                unsafe { ffi::deflateParams(stream, level.0 as c_int, ffi::MZ_DEFAULT_STRATEGY) };
+
+            match rc {
+                ffi::MZ_OK => Ok(()),
+                ffi::MZ_BUF_ERROR => compress_failed(self.inner.inner.msg()),
+                c => panic!("unknown return code: {}", c),
+            }
         }
     }
 

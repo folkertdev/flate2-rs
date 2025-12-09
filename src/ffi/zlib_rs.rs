@@ -235,4 +235,20 @@ impl Deflate {
             Err(_) => self.compress_error(),
         }
     }
+
+    pub fn set_level(&mut self, level: Compression) -> Result<(), CompressError> {
+        use ::zlib_rs::Status;
+
+        match self.inner.set_level(level.level() as i32) {
+            Ok(status) => match status {
+                Status::Ok => Ok(()),
+
+                Status::BufError => compress_failed(ErrorMessage(Some("insufficient space"))),
+
+                Status::StreamEnd => unreachable!(),
+            },
+
+            Err(_) => self.compress_error(),
+        }
+    }
 }
