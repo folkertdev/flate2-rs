@@ -30,6 +30,7 @@ pub const MZ_FINISH: isize = DeflateFlush::Finish as isize;
 pub const MZ_DEFAULT_WINDOW_BITS: core::ffi::c_int = 15;
 
 use super::*;
+use crate::mem::{compress_failed, decompress_failed};
 
 impl From<::zlib_rs::Status> for crate::mem::Status {
     fn from(value: ::zlib_rs::Status) -> Self {
@@ -110,7 +111,7 @@ impl InflateBackend for Inflate {
         match result {
             Ok(status) => Ok(status.into()),
             Err(InflateError::NeedDict { dict_id }) => crate::mem::decompress_need_dict(dict_id),
-            Err(e) => crate::mem::decompress_failed(ErrorMessage(Some(e.as_str()))),
+            Err(_) => self.decompress_error(),
         }
     }
 
@@ -130,6 +131,12 @@ impl Backend for Inflate {
     #[inline]
     fn total_out(&self) -> u64 {
         self.total_out
+    }
+}
+
+impl Inflate {
+    fn decompress_error<T>(&self) -> Result<T, DecompressError> {
+        decompress_failed(ErrorMessage(self.inner.error_message()))
     }
 }
 
@@ -187,7 +194,7 @@ impl DeflateBackend for Deflate {
 
         match result {
             Ok(status) => Ok(status.into()),
-            Err(e) => crate::mem::compress_failed(ErrorMessage(Some(e.as_str()))),
+            Err(_) => self.compress_error(),
         }
     }
 
@@ -207,5 +214,11 @@ impl Backend for Deflate {
     #[inline]
     fn total_out(&self) -> u64 {
         self.total_out
+    }
+}
+
+impl Deflate {
+    fn compress_error<T>(&self) -> Result<T, CompressError> {
+        compress_failed(ErrorMessage(self.inner.error_message()))
     }
 }

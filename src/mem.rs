@@ -806,7 +806,7 @@ mod tests {
         assert_eq!(&decoded[..decoder.total_out() as usize], string);
     }
 
-    #[cfg(feature = "any_zlib")]
+    #[cfg(any(feature = "any_zlib", feature = "zlib-rs"))]
     #[test]
     fn test_error_message() {
         let mut decoder = Decompress::new(false);
