@@ -19,6 +19,7 @@
 
 use std::fmt;
 
+use crate::mem::{compress_failed, decompress_failed};
 use ::zlib_rs::{DeflateFlush, InflateError, InflateFlush};
 
 pub const MZ_NO_FLUSH: isize = DeflateFlush::NoFlush as isize;
@@ -52,6 +53,8 @@ impl ErrorMessage {
 
 pub struct Inflate {
     pub(crate) inner: ::zlib_rs::Inflate,
+    total_in: u64,
+    total_out: u64,
 }
 
 impl fmt::Debug for Inflate {
@@ -59,8 +62,8 @@ impl fmt::Debug for Inflate {
         write!(
             f,
             "zlib_rs inflate internal state. total_in: {}, total_out: {}",
-            self.inner.total_in(),
-            self.inner.total_out(),
+            self.total_in(),
+            self.total_out(),
         )
     }
 }
@@ -79,6 +82,8 @@ impl InflateBackend for Inflate {
     fn make(zlib_header: bool, window_bits: u8) -> Self {
         Inflate {
             inner: ::zlib_rs::Inflate::new(zlib_header, window_bits),
+            total_in: 0,
+            total_out: 0,
         }
     }
 
@@ -94,32 +99,57 @@ impl InflateBackend for Inflate {
             FlushDecompress::Finish => InflateFlush::Finish,
         };
 
-        match self.inner.decompress(input, output, flush) {
+        let total_in_start = self.inner.total_in();
+        let total_out_start = self.inner.total_out();
+
+        let result = self.inner.decompress(input, output, flush);
+
+        self.total_in += self.inner.total_in() - total_in_start;
+        self.total_out += self.inner.total_out() - total_out_start;
+
+        match result {
             Ok(status) => Ok(status.into()),
             Err(InflateError::NeedDict { dict_id }) => crate::mem::decompress_need_dict(dict_id),
-            Err(e) => crate::mem::decompress_failed(ErrorMessage(Some(e.as_str()))),
+            Err(_) => self.decompress_error(),
         }
     }
 
     fn reset(&mut self, zlib_header: bool) {
         self.inner.reset(zlib_header);
+        self.total_in = 0;
+        self.total_out = 0;
     }
 }
 
 impl Backend for Inflate {
     #[inline]
     fn total_in(&self) -> u64 {
-        self.inner.total_in()
+        self.total_in
     }
 
     #[inline]
     fn total_out(&self) -> u64 {
-        self.inner.total_out()
+        self.total_out
+    }
+}
+
+impl Inflate {
+    fn decompress_error<T>(&self) -> Result<T, DecompressError> {
+        decompress_failed(ErrorMessage(self.inner.error_message()))
+    }
+
+    pub fn set_dictionary(&mut self, dictionary: &[u8]) -> Result<u32, DecompressError> {
+        match self.inner.set_dictionary(dictionary) {
+            Ok(v) => Ok(v),
+            Err(_) => self.decompress_error(),
+        }
     }
 }
 
 pub struct Deflate {
     pub(crate) inner: ::zlib_rs::Deflate,
+    total_in: u64,
+    total_out: u64,
 }
 
 impl fmt::Debug for Deflate {
@@ -140,6 +170,8 @@ impl DeflateBackend for Deflate {
 
         Deflate {
             inner: ::zlib_rs::Deflate::new(level.level() as i32, zlib_header, window_bits),
+            total_in: 0,
+            total_out: 0,
         }
     }
 
@@ -157,25 +189,61 @@ impl DeflateBackend for Deflate {
             FlushCompress::Finish => DeflateFlush::Finish,
         };
 
-        match self.inner.compress(input, output, flush) {
+        let total_in_start = self.inner.total_in();
+        let total_out_start = self.inner.total_out();
+
+        let result = self.inner.compress(input, output, flush);
+
+        self.total_in += self.inner.total_in() - total_in_start;
+        self.total_out += self.inner.total_out() - total_out_start;
+
+        match result {
             Ok(status) => Ok(status.into()),
-            Err(e) => crate::mem::compress_failed(ErrorMessage(Some(e.as_str()))),
+            Err(_) => self.compress_error(),
         }
     }
 
     fn reset(&mut self) {
         self.inner.reset();
+        self.total_in = 0;
+        self.total_out = 0;
     }
 }
 
 impl Backend for Deflate {
     #[inline]
     fn total_in(&self) -> u64 {
-        self.inner.total_in()
+        self.total_in
     }
 
     #[inline]
     fn total_out(&self) -> u64 {
-        self.inner.total_out()
+        self.total_out
+    }
+}
+
+impl Deflate {
+    fn compress_error<T>(&self) -> Result<T, CompressError> {
+        compress_failed(ErrorMessage(self.inner.error_message()))
+    }
+
+    pub fn set_dictionary(&mut self, dictionary: &[u8]) -> Result<u32, CompressError> {
+        match self.inner.set_dictionary(dictionary) {
+            Ok(v) => Ok(v),
+            Err(_) => self.compress_error(),
+        }
+    }
+
+    pub fn set_level(&mut self, level: Compression) -> Result<(), CompressError> {
+        use ::zlib_rs::Status;
+
+        match self.inner.set_level(level.level() as i32) {
+            Ok(status) => match status {
+                Status::Ok => Ok(()),
+                Status::BufError => compress_failed(ErrorMessage(Some("insufficient space"))),
+                Status::StreamEnd => unreachable!(),
+            },
+            Err(_) => self.compress_error(),
+        }
     }
 }

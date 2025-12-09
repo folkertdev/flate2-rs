@@ -278,12 +278,24 @@ impl Compress {
             ffi::deflateSetDictionary(stream, dictionary.as_ptr(), dictionary.len() as ffi::uInt)
         };
 
+        unsafe {
+            dbg!((*stream).total_in);
+        }
+
         match rc {
             ffi::MZ_STREAM_ERROR => compress_failed(self.inner.inner.msg()),
             #[allow(clippy::unnecessary_cast)]
             ffi::MZ_OK => Ok(unsafe { (*stream).adler } as u32),
             c => panic!("unknown return code: {}", c),
         }
+    }
+
+    /// Specifies the compression dictionary to use.
+    ///
+    /// Returns the Adler-32 checksum of the dictionary.
+    #[cfg(feature = "zlib-rs")]
+    pub fn set_dictionary(&mut self, dictionary: &[u8]) -> Result<u32, CompressError> {
+        self.inner.set_dictionary(dictionary)
     }
 
     /// Quickly resets this compressor without having to reallocate anything.
@@ -303,22 +315,31 @@ impl Compress {
     /// the compression of the available input data before changing the
     /// compression level. Flushing the stream before calling this method
     /// ensures that the function will succeed on the first call.
-    #[cfg(feature = "any_zlib")]
+    #[cfg(any(feature = "any_zlib", feature = "zlib-rs"))]
     pub fn set_level(&mut self, level: Compression) -> Result<(), CompressError> {
-        use std::os::raw::c_int;
-        // SAFETY: The field `inner` must always be accessed as a raw pointer,
-        // since it points to a cyclic structure. No copies of `inner` can be
-        // retained for longer than the lifetime of `self.inner.inner.stream_wrapper`.
-        let stream = self.inner.inner.stream_wrapper.inner;
-        unsafe {
-            (*stream).msg = std::ptr::null_mut();
+        #[cfg(feature = "zlib-rs")]
+        {
+            self.inner.set_level(level)
         }
-        let rc = unsafe { ffi::deflateParams(stream, level.0 as c_int, ffi::MZ_DEFAULT_STRATEGY) };
 
-        match rc {
-            ffi::MZ_OK => Ok(()),
-            ffi::MZ_BUF_ERROR => compress_failed(self.inner.inner.msg()),
-            c => panic!("unknown return code: {}", c),
+        #[cfg(feature = "any_zlib")]
+        {
+            use std::os::raw::c_int;
+            // SAFETY: The field `inner` must always be accessed as a raw pointer,
+            // since it points to a cyclic structure. No copies of `inner` can be
+            // retained for longer than the lifetime of `self.inner.inner.stream_wrapper`.
+            let stream = self.inner.inner.stream_wrapper.inner;
+            unsafe {
+                (*stream).msg = std::ptr::null_mut();
+            }
+            let rc =
+                unsafe { ffi::deflateParams(stream, level.0 as c_int, ffi::MZ_DEFAULT_STRATEGY) };
+
+            match rc {
+                ffi::MZ_OK => Ok(()),
+                ffi::MZ_BUF_ERROR => compress_failed(self.inner.inner.msg()),
+                c => panic!("unknown return code: {}", c),
+            }
         }
     }
 
@@ -540,6 +561,12 @@ impl Decompress {
         }
     }
 
+    /// Specifies the decompression dictionary to use.
+    #[cfg(feature = "zlib-rs")]
+    pub fn set_dictionary(&mut self, dictionary: &[u8]) -> Result<u32, DecompressError> {
+        self.inner.set_dictionary(dictionary)
+    }
+
     /// Performs the equivalent of replacing this decompression state with a
     /// freshly allocated copy.
     ///
@@ -700,7 +727,7 @@ mod tests {
         assert!(dst.starts_with(string));
     }
 
-    #[cfg(feature = "any_zlib")]
+    // #[cfg(any(feature = "any_zlib", feature = "zlib-rs"))]
     #[test]
     fn set_dictionary_with_zlib_header() {
         let string = "hello, hello!".as_bytes();
@@ -718,6 +745,8 @@ mod tests {
 
         assert_eq!(encoder.total_in(), string.len() as u64);
         assert_eq!(encoder.total_out(), encoded.len() as u64);
+
+        dbg!(&encoded);
 
         let mut decoder = Decompress::new(true);
         let mut decoded = [0; 1024];
@@ -739,17 +768,20 @@ mod tests {
         let total_in = decoder.total_in();
         let total_out = decoder.total_out();
 
+        dbg!(total_in, total_out);
+
         let decompress_result = decoder.decompress(
             &encoded[total_in as usize..],
             &mut decoded[total_out as usize..],
             FlushDecompress::Finish,
         );
+        dbg!(&decompress_result);
         assert!(decompress_result.is_ok());
 
         assert_eq!(&decoded[..decoder.total_out() as usize], string);
     }
 
-    #[cfg(feature = "any_zlib")]
+    #[cfg(any(feature = "any_zlib", feature = "zlib-rs"))]
     #[test]
     fn set_dictionary_raw() {
         let string = "hello, hello!".as_bytes();
@@ -759,7 +791,11 @@ mod tests {
 
         let mut encoder = Compress::new(Compression::default(), false);
 
+        dbg!(encoder.total_in());
+
         encoder.set_dictionary(&dictionary).unwrap();
+
+        dbg!(encoder.total_in());
 
         encoder
             .compress_vec(string, &mut encoded, FlushCompress::Finish)
@@ -806,7 +842,7 @@ mod tests {
         assert_eq!(&decoded[..decoder.total_out() as usize], string);
     }
 
-    #[cfg(feature = "any_zlib")]
+    #[cfg(any(feature = "any_zlib", feature = "zlib-rs"))]
     #[test]
     fn test_error_message() {
         let mut decoder = Decompress::new(false);
