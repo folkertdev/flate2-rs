@@ -289,7 +289,7 @@ impl Compress {
     /// Specifies the compression dictionary to use.
     ///
     /// Returns the Adler-32 checksum of the dictionary.
-    #[cfg(feature = "zlib-rs")]
+    #[cfg(all(not(feature = "any_zlib"), feature = "zlib-rs"))]
     pub fn set_dictionary(&mut self, dictionary: &[u8]) -> Result<u32, CompressError> {
         self.inner.set_dictionary(dictionary)
     }
@@ -313,7 +313,7 @@ impl Compress {
     /// ensures that the function will succeed on the first call.
     #[cfg(any(feature = "any_zlib", feature = "zlib-rs"))]
     pub fn set_level(&mut self, level: Compression) -> Result<(), CompressError> {
-        #[cfg(feature = "zlib-rs")]
+        #[cfg(all(not(feature = "any_zlib"), feature = "zlib-rs"))]
         {
             self.inner.set_level(level)
         }
@@ -558,7 +558,7 @@ impl Decompress {
     }
 
     /// Specifies the decompression dictionary to use.
-    #[cfg(feature = "zlib-rs")]
+    #[cfg(all(not(feature = "any_zlib"), feature = "zlib-rs"))]
     pub fn set_dictionary(&mut self, dictionary: &[u8]) -> Result<u32, DecompressError> {
         self.inner.set_dictionary(dictionary)
     }
@@ -772,7 +772,7 @@ mod tests {
         assert_eq!(&decoded[..decoder.total_out() as usize], string);
     }
 
-    #[cfg(any(feature = "any_zlib", feature = "zlib-rs"))]
+    #[cfg(feature = "any_zlib")]
     #[test]
     fn set_dictionary_raw() {
         let string = "hello, hello!".as_bytes();
